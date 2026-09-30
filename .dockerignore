@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.uv-cache
+**/.uv-python
+**/.next
+node_modules
+*.egg-info
+*.tsbuildinfo
+*.log

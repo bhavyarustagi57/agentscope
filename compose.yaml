@@ -1,0 +1,151 @@
+name: agentscope
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agentscope}
+      POSTGRES_USER: ${POSTGRES_USER:-agentscope}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    image: agentscope-api
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agentscope:local-development-only@postgres:5432/agentscope}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: agentscope-api
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["uvicorn", "agentscope_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agentscope:local-development-only@postgres:5432/agentscope}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      DEPENDENCY_PROBE_TIMEOUT_SECONDS: ${DEPENDENCY_PROBE_TIMEOUT_SECONDS:-1}
+      BISECTION_MAX_COMMIT_RANGE: ${BISECTION_MAX_COMMIT_RANGE:-500}
+      BISECTION_WORK_ROOT: ${BISECTION_WORK_ROOT:-/tmp/agentscope-bisection-worktrees}
+      BISECTION_EXECUTION_MAX_ATTEMPTS: ${BISECTION_EXECUTION_MAX_ATTEMPTS:-3}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+  worker:
+    image: agentscope-api
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command:
+      - "dramatiq"
+      - "agentscope_api.jobs.demo"
+      - "agentscope_api.jobs.evaluations"
+      - "agentscope_api.jobs.experiments"
+      - "agentscope_api.jobs.calibration"
+      - "agentscope_api.jobs.monitoring"
+      - "agentscope_api.jobs.automatic_drift"
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agentscope:local-development-only@postgres:5432/agentscope}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      EVALUATION_RECOVERY_INTERVAL_SECONDS: ${EVALUATION_RECOVERY_INTERVAL_SECONDS:-60}
+      MONITORING_MAX_CATCHUP_WINDOWS: ${MONITORING_MAX_CATCHUP_WINDOWS:-24}
+      MONITORING_MAX_DRIFT_CHECKS_PER_SCAN: ${MONITORING_MAX_DRIFT_CHECKS_PER_SCAN:-100}
+      BISECTION_MAX_COMMIT_RANGE: ${BISECTION_MAX_COMMIT_RANGE:-500}
+      BISECTION_WORK_ROOT: ${BISECTION_WORK_ROOT:-/tmp/agentscope-bisection-worktrees}
+      BISECTION_EXECUTION_MAX_ATTEMPTS: ${BISECTION_EXECUTION_MAX_ATTEMPTS:-3}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  preflight:
+    profiles: ["tools"]
+    image: agentscope-api
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["agentscope-preflight"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agentscope:local-development-only@postgres:5432/agentscope}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      DEPENDENCY_PROBE_TIMEOUT_SECONDS: ${DEPENDENCY_PROBE_TIMEOUT_SECONDS:-1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

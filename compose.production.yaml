@@ -1,0 +1,167 @@
+name: agentscope-production
+
+x-api-image: &api-image
+  image: agentscope-api:${AGENTSCOPE_IMAGE_TAG:-local}
+  build:
+    context: .
+    dockerfile: apps/api/Dockerfile
+
+x-api-environment: &api-environment
+  APP_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in the production environment file}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS in the production environment file}
+  DEPENDENCY_PROBE_TIMEOUT_SECONDS: ${DEPENDENCY_PROBE_TIMEOUT_SECONDS:-1}
+  EVALUATION_RECOVERY_INTERVAL_SECONDS: ${EVALUATION_RECOVERY_INTERVAL_SECONDS:-60}
+  MONITORING_MAX_CATCHUP_WINDOWS: ${MONITORING_MAX_CATCHUP_WINDOWS:-24}
+  MONITORING_MAX_DRIFT_CHECKS_PER_SCAN: ${MONITORING_MAX_DRIFT_CHECKS_PER_SCAN:-100}
+  BISECTION_MAX_COMMIT_RANGE: ${BISECTION_MAX_COMMIT_RANGE:-500}
+  BISECTION_WORK_ROOT: ${BISECTION_WORK_ROOT:-/tmp/agentscope-bisection-worktrees}
+  BISECTION_EXECUTION_MAX_ATTEMPTS: ${BISECTION_EXECUTION_MAX_ATTEMPTS:-3}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the production environment file}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the production environment file}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the production environment file}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+  api:
+    <<: *api-image
+    command: ["uvicorn", "agentscope_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *api-environment
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${API_HOST_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+  worker:
+    <<: *api-image
+    command:
+      - dramatiq
+      - agentscope_api.jobs.demo
+      - agentscope_api.jobs.evaluations
+      - agentscope_api.jobs.experiments
+      - agentscope_api.jobs.calibration
+      - agentscope_api.jobs.monitoring
+      - agentscope_api.jobs.automatic_drift
+      - --processes
+      - ${WORKER_PROCESSES:-2}
+      - --threads
+      - ${WORKER_THREADS:-4}
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  web:
+    image: agentscope-web:${AGENTSCOPE_IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Set NEXT_PUBLIC_API_URL in the production environment file}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Set NEXT_PUBLIC_API_URL in the production environment file}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${WEB_HOST_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+  migrate:
+    <<: *api-image
+    profiles: ["tools"]
+    command: ["alembic", "upgrade", "head"]
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  preflight:
+    <<: *api-image
+    profiles: ["tools"]
+    command: ["agentscope-preflight"]
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  demo-seed:
+    <<: *api-image
+    profiles: ["tools"]
+    command: ["python", "scripts/seed_demo.py", "--api-url", "http://api:8000"]
+    environment: *api-environment
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: "no"
+
+  smoke:
+    <<: *api-image
+    profiles: ["tools"]
+    command:
+      - python
+      - scripts/deployment_smoke.py
+      - --api-url
+      - http://api:8000
+      - --web-url
+      - http://web:3000
+    environment: *api-environment
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  postgres_data:

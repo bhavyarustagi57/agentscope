@@ -1,0 +1,30 @@
+{
+  "name": "@agentscope/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ../../node_modules/next/dist/bin/next dev --hostname 0.0.0.0",
+    "build": "node ../../node_modules/next/dist/bin/next build",
+    "start": "node ../../node_modules/next/dist/bin/next start --hostname 0.0.0.0",
+    "test": "node --test src/lib/*.test.mjs",
+    "lint": "node ../../node_modules/eslint/bin/eslint.js .",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc --noEmit",
+    "check": "npm run test && npm run lint && npm run typecheck && npm run build"
+  },
+  "dependencies": {
+    "next": "^16.2.9",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "eslint": "^10.0.0",
+    "eslint-config-next": "^16.2.9",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.8.0"
+  }
+}

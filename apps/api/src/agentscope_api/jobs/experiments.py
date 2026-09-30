@@ -1,0 +1,26 @@
+from __future__ import annotations
+
+import logging
+from uuid import UUID
+
+import dramatiq
+
+from agentscope_api.jobs.broker import broker as broker
+from agentscope_api.services.experiment_execution import ProcessOutcome, process_experiment_message
+
+logger = logging.getLogger(__name__)
+
+
+@dramatiq.actor(queue_name="evaluations", max_retries=0)
+async def experiment_run_job(run_id: str) -> None:
+    try:
+        parsed = UUID(run_id)
+    except ValueError:
+        logger.warning("experiment_message_rejected category=invalid_run_id")
+        return
+    if await process_experiment_message(parsed) is ProcessOutcome.REQUEUED:
+        experiment_run_job.send_with_options(args=(run_id,), delay=5_000)
+
+
+def enqueue_experiment_run(run_id: UUID) -> None:
+    experiment_run_job.send(str(run_id))

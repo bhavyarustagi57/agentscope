@@ -1,0 +1,24 @@
+{
+  "name": "agentscope",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "docker compose up --build",
+    "down": "docker compose down",
+    "logs": "docker compose logs -f",
+    "migrate": "docker compose run --rm migrate",
+    "test:api": "docker compose run --rm api pytest",
+    "check:sdk": "uv run --project packages/python-sdk ruff check packages/python-sdk && uv run --project packages/python-sdk mypy packages/python-sdk/src && uv run --project packages/python-sdk pytest -q packages/python-sdk/tests",
+    "example:sdk": "uv run --project packages/python-sdk python packages/python-sdk/examples/basic_agent_trace.py",
+    "example:sdk:http": "uv run --project packages/python-sdk python packages/python-sdk/examples/http_exporter_config.py",
+    "example:sdk:langgraph": "uv run --project packages/python-sdk python packages/python-sdk/examples/langgraph_agent.py",
+    "example:sdk:openai": "uv run --project packages/python-sdk python packages/python-sdk/examples/raw_openai_agent.py",
+    "check:web": "npm run check --workspace @agentscope/web",
+    "worker": "docker compose run --rm worker"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

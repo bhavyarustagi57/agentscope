@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sdk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/python-sdk
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --dev
+      - run: uv lock --check
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: uv run pytest -q
+      - run: uv audit
+      - run: uv build
+      - name: Verify isolated wheel import
+        run: |
+          wheel=$(find dist -name '*.whl' -print -quit)
+          uv run --isolated --no-project --with "$wheel" python -c "import importlib.util; import agentscope_sdk; assert importlib.util.find_spec('openai') is None; assert importlib.util.find_spec('langgraph') is None"
+      - name: Verify optional OpenAI installation
+        run: |
+          wheel=$(find dist -name '*.whl' -print -quit)
+          uv run --isolated --no-project --with "$wheel[openai]" python -c "import openai; from agentscope_sdk import OpenAIInstrumentation; print(openai.__version__)"
+      - name: Verify optional LangGraph installation
+        run: |
+          wheel=$(find dist -name '*.whl' -print -quit)
+          uv run --isolated --no-project --with "$wheel[langgraph]" python -c "import langgraph; from agentscope_sdk.adapters.langgraph import LangGraphInstrumentation"
+      - name: Verify combined adapter installation
+        run: |
+          wheel=$(find dist -name '*.whl' -print -quit)
+          uv run --isolated --no-project --with "$wheel[openai,langgraph]" python -c "from agentscope_sdk import OpenAIInstrumentation; from agentscope_sdk.adapters.langgraph import LangGraphInstrumentation"
+
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: agentscope_test
+          POSTGRES_USER: agentscope
+          POSTGRES_PASSWORD: local-development-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentscope -d agentscope_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://agentscope:local-development-only@localhost:5432/agentscope_test
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --dev
+      - run: uv lock --check
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: uv run alembic upgrade head
+      - run: uv run alembic check
+      - run: uv run alembic downgrade -1
+      - run: uv run alembic upgrade head
+      - run: uv run alembic check
+      - run: uv run pytest -q
+      - run: uv audit
+
+  web:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check:web
+      - run: npm audit
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate production Compose
+        run: docker compose --env-file .env.production.example -f compose.production.yaml config --quiet
+      - name: Build production images
+        run: docker compose --env-file .env.production.example -f compose.production.yaml build api web

@@ -1,0 +1,42 @@
+# Environment and credentials
+.env
+.env.*
+!.env.example
+!.env.production.example
+*.pem
+*.key
+
+# JavaScript
+node_modules/
+.next/
+out/
+npm-debug.log*
+.npm-cache/
+.playwright-mcp/
+artifacts/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.uv-cache/
+.uv-python/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Runtime data
+*.log
+.docker/
