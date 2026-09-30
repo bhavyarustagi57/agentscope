@@ -142,7 +142,6 @@ class AutomaticDriftCheckRecord(Base):
     drift_comparison_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("drift_comparisons.id", ondelete="RESTRICT"),
-        unique=True,
     )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", server_default="pending"

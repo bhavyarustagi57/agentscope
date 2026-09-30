@@ -9,7 +9,7 @@ test("development keeps the explicit local API convenience default", () => {
 });
 
 test("production requires an explicit browser-visible API URL", () => {
-  assert.throws(() => resolveApiBaseUrl(undefined, "production"), /NEXT_PUBLIC_API_URL/);
+  assert.throws(() => resolveApiBaseUrl("", "production"), /NEXT_PUBLIC_API_URL/);
 });
 
 test("API configuration accepts only a credential-free HTTP origin", () => {

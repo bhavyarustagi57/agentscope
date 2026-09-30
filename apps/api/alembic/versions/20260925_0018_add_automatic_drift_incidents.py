@@ -86,7 +86,6 @@ def upgrade() -> None:
             "drift_comparison_id",
             uuid,
             sa.ForeignKey("drift_comparisons.id", ondelete="RESTRICT"),
-            unique=True,
         ),
         sa.Column("status", sa.String(20), nullable=False, server_default="pending"),
         sa.Column("skip_reason", sa.String(50)),
